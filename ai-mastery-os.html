@@ -2870,19 +2870,190 @@ let leituraAberta = null;
 
 const LEITURAS = {
 "React":[
- {c:"React.memo", o:"Evita re-render de um componente quando as props não mudaram — memorização no nível do componente. Só ajuda se as props forem estáveis (cuidado com objetos/funções recriados).", l:"https://react.dev/reference/react/memo", ex:"Crie um card que dá console.log a cada render; envolva com memo e prove que ele para de logar quando o pai re-renderiza."},
- {c:"useEffect", o:"Sincroniza o componente com sistemas externos (timers, APIs, eventos). Roda após o render; o retorno é o cleanup, que desfaz o efeito antes do próximo ciclo.", l:"https://react.dev/reference/react/useEffect", ex:"Relógio com setInterval — sem cleanup ele duplica ao remontar; conserte devolvendo clearInterval e prove no console."},
- {c:"Context", o:"Leva dados à árvore inteira sem prop drilling. Ideal para tema, usuário e idioma; ruim para estado que muda a cada tecla (re-renderiza todos os consumidores).", l:"https://react.dev/learn/passing-data-deeply-with-context", ex:"Tema claro/escuro com createContext + useContext + botão de toggle em um componente neto."},
- {c:"useMemo & useCallback", o:"Memorizam cálculos e funções entre renders. Regra sênior: use quando o custo for medido, não por hábito — memoização também tem custo.", l:"https://react.dev/reference/react/useMemo", ex:"Filtre uma lista de 10 mil itens e meça com console.time antes e depois do useMemo."},
- {c:"useReducer", o:"Estado complexo com transições explícitas (ações) — o padrão estado→render deste app, formalizado. Reducer é função pura: fácil de testar.", l:"https://react.dev/reference/react/useReducer", ex:"Carrinho de compras com ADD/REMOVE/CLEAR num reducer puro + 3 testes."},
- {c:"Custom Hooks", o:"Extraem lógica com estado para funções reutilizáveis use*. São a 'lib interna' do React — o primeiro passo de escala de código.", l:"https://react.dev/learn/reusing-logic-with-custom-hooks", ex:"Escreva useLocalStorage(chave, inicial) e use em 2 componentes diferentes."}],
+ {c:"Rendering: o que é 'render' e o que exatamente re-renderiza",
+  o:"'Render' NÃO é 'desenhar na tela'. Render é o React CHAMAR sua função de componente para obter a descrição da UI (os elementos JSX). Depois vem o commit, que aplica as diferenças ao DOM real. Entender essa separação é o que separa júnior de sênior em React.",
+  mental:"Pense em 3 fases: <b>Trigger</b> (algo pede atualização) → <b>Render</b> (React chama seu componente e monta a nova árvore de elementos) → <b>Commit</b> (React compara com a árvore anterior — reconciliation — e toca no DOM só onde mudou). Renderizar é barato e frequente; tocar no DOM é caro e raro.",
+  fundo:"Só existem DOIS gatilhos de render: (1) o render inicial (mount) e (2) uma mudança de estado — <code>setState</code>/<code>dispatch</code>/atualização de um hook de estado. Mudar uma variável comum NÃO re-renderiza; só o setter de estado agenda um render. Quando um componente re-renderiza, <b>TODOS os seus filhos re-renderizam por padrão</b> — mesmo que as props deles não tenham mudado. Isso choca todo mundo: não é a prop que muda que causa o render do filho, é o PAI ter renderizado.",
+  rerender:"Um componente re-renderiza quando: (a) seu próprio estado muda, (b) seu componente pai re-renderiza, ou (c) um Context que ele consome muda de valor. Props mudando NÃO é, por si só, um gatilho — o filho já ia renderizar porque o pai renderrou. <code>React.memo</code> é o que faz o filho PULAR o render quando as props (comparadas por referência, shallow) são iguais.",
+  codigo:`function Pai(){
+  const [n, setN] = useState(0);
+  console.log("Pai renderizou");
+  return (
+    <>
+      <button onClick={() => setN(n + 1)}>{n}</button>
+      <Filho />   {/* Filho re-renderiza a CADA clique,
+                      mesmo sem receber props! Porque o Pai renderizou. */}
+    </>
+  );
+}
+function Filho(){ console.log("Filho renderizou"); return <p>oi</p>; }
+// Clique no botão → console: "Pai renderizou" E "Filho renderizou".
+// Surpreso? É o comportamento padrão. memo(Filho) faria o Filho pular.`,
+  armadilha:"'A tela não mudou, então não renderizou' — FALSO. O componente pode rodar 10 vezes e o DOM não mudar (o commit não achou diferença). Custo de render existe mesmo sem mudança visível. Meça com o React DevTools Profiler, não com os olhos.",
+  senior:"Renderizar demais raramente é o gargalo — o React é rápido. Só otimize (memo/useMemo) o que o Profiler apontar. Antes disso, prefira 'mover o estado para baixo' e 'children as props' para conter o re-render na fronteira certa.",
+  l:"https://react.dev/learn/render-and-commit",
+  ex:"Reproduza o exemplo acima. Confirme no console que o Filho loga a cada clique. Depois envolva com React.memo e prove que ele PARA de logar — você viu, na prática, a diferença entre 'pai renderizou' e 'props mudaram'."},
+ {c:"React.memo — pular o render do filho",
+  o:"memo memoriza um componente: se as props não mudaram (comparação rasa por referência), o React reaproveita o resultado anterior e NÃO chama a função do componente. É a defesa contra o 'pai renderizou → filho renderizou' da leitura anterior.",
+  mental:"memo é um portão na entrada do componente: 'as props são as mesmas de antes? Então nem entra, devolve o de antes'. A comparação é <b>shallow</b> (===): funciona para números/strings/booleans, mas quebra para objetos/arrays/funções recriados a cada render do pai.",
+  fundo:"Por que um objeto inline quebra o memo? Porque <code>{a:1}</code> ou <code>() => {}</code> criam uma NOVA referência a cada render do pai. <code>prevProps.style === nextProps.style</code> vira false, o memo acha que mudou e renderiza mesmo assim. Solução: estabilize essas referências com useMemo (objetos) e useCallback (funções) — memo e useCallback são um casal, raramente úteis sozinhos.",
+  codigo:`const Filho = React.memo(function Filho({ dados, onClick }){
+  console.log("Filho renderizou");
+  return <button onClick={onClick}>{dados.nome}</button>;
+});
+// No Pai:
+const dados = useMemo(() => ({ nome: "Ana" }), []);      // referência estável
+const onClick = useCallback(() => console.log("hi"), []); // idem
+// SEM os useMemo/useCallback, o memo do Filho é INÚTIL:
+// dados e onClick nasceriam novos a cada render do Pai.`,
+  armadilha:"Espalhar memo em tudo 'por garantia' deixa o app MAIS lento e o código mais complexo: cada memo faz uma comparação de props a cada render. Use onde o Profiler mostrar componente pesado re-renderizando à toa.",
+  l:"https://react.dev/reference/react/memo",
+  ex:"Crie um Filho memoizado que recebe um objeto. Passe o objeto inline e veja o memo falhar (Filho loga sempre). Estabilize com useMemo e prove que o Filho para de logar."},
+ {c:"useState — estado, batching e closures obsoletas (stale)",
+  o:"useState guarda um valor entre renders e devolve [valor, setter]. Chamar o setter AGENDA um re-render com o novo valor — não muda a variável na hora. E várias chamadas no mesmo evento são agrupadas (batching): um render só.",
+  mental:"Cada render é uma 'foto' com seus próprios valores de estado congelados. O <code>n</code> dentro de um render é uma constante daquela foto — ele nunca muda no meio do caminho; o próximo render é que recebe o novo <code>n</code>.",
+  fundo:"Por isso <code>setN(n+1)</code> três vezes seguidas resulta em +1, não +3: as três leem o mesmo <code>n</code> da foto atual. A forma correta de somar em cima do valor mais recente é a função updater: <code>setN(prev => prev + 1)</code> — o React passa o valor pendente, não o da closure.",
+  codigo:`const [n, setN] = useState(0);
+function tresVezes(){
+  setN(n + 1);   // n é 0 nesta foto → agenda 1
+  setN(n + 1);   // n ainda é 0 aqui → agenda 1
+  setN(n + 1);   // idem → resultado final: 1, não 3
+}
+function tresVezesCerto(){
+  setN(p => p + 1);  // 0 → 1
+  setN(p => p + 1);  // 1 → 2
+  setN(p => p + 1);  // 2 → 3  ✅
+}`,
+  armadilha:"'Stale closure': um setInterval/callback criado num render captura o estado DAQUELE render para sempre. Meses de bugs vêm disso. Conserte com a função updater (setN(p=>...)) ou com a dependência certa no useEffect.",
+  l:"https://react.dev/learn/state-as-a-snapshot",
+  ex:"Faça um botão que chama setN(n+1) três vezes e veja somar só 1. Troque para setN(p=>p+1) e veja somar 3. Explique por quê para alguém em voz alta."},
+ {c:"useEffect — sincronização, dependências e cleanup",
+  o:"useEffect sincroniza o componente com o mundo FORA do React (timers, subscriptions, requisições, DOM manual). Roda DEPOIS do commit (a tela já está pintada). O array de dependências decide quando re-executar; o retorno é a limpeza.",
+  mental:"Não pense 'rodar quando montar'. Pense 'manter isto em sincronia com estes valores'. Se um valor do array muda, o React roda o cleanup do efeito anterior e executa o efeito de novo com os valores novos.",
+  fundo:"Ciclo real: efeito roda → deps mudam no próximo render → React roda o CLEANUP do efeito antigo → roda o efeito novo. No StrictMode (dev), o React monta, desmonta e remonta cada componente de propósito para EXPOR efeitos sem cleanup — se seu efeito duplica (2 sockets, 2 intervals), é bug seu, não do React.",
+  codigo:`useEffect(() => {
+  const id = setInterval(() => setT(Date.now()), 1000);
+  return () => clearInterval(id);   // cleanup: sem isso, cada
+}, []);                             // remontagem deixa um timer vivo
+// [] = roda uma vez ao montar. [userId] = re-sincroniza quando userId muda.
+// SEM array = roda após TODO render (quase sempre um bug).`,
+  rerender:"O efeito não causa render; ele REAGE a renders. Mas se dentro do efeito você chama setState, isso agenda um novo render — cuidado com loops (efeito que muda um estado que está nas suas próprias deps).",
+  armadilha:"Dependência faltando = closure obsoleta (usa valor velho). Dependência a mais = efeito roda demais. Não minta para o linter removendo deps — resolva a causa (useCallback, updater, ou repensar se precisa de efeito).",
+  senior:"Muitos useEffect são desnecessários: se você calcula algo a partir de props/estado, faça no render (ou useMemo), não num efeito que 'seta outro estado'. Efeito é para EFEITO COLATERAL externo, não para derivar dados.",
+  l:"https://react.dev/reference/react/useEffect",
+  ex:"Relógio com setInterval. Rode sem cleanup no StrictMode e veja o tempo pular de 2 em 2 (dois timers). Adicione o clearInterval e prove que normalizou."},
+ {c:"Context — escopo, e por que ele re-renderiza tudo",
+  o:"Context entrega um valor a toda a subárvore sem passar props manualmente (evita prop drilling). Ótimo para tema, usuário, idioma — coisas que mudam POUCO e são lidas em MUITOS lugares.",
+  mental:"Context é uma 'variável de ambiente' da árvore React. Um Provider define o valor; qualquer descendente lê com useContext sem intermediários.",
+  rerender:"Quando o value do Provider muda (por referência!), TODOS os componentes que fazem useContext desse contexto re-renderizam — não dá para memoizar essa parte por fora. Por isso Context é péssimo para estado que muda a cada tecla: você re-renderiza a árvore inteira a cada caractere.",
+  fundo:"Armadilha clássica: <code>&lt;Ctx.Provider value={{user, setUser}}&gt;</code> cria um objeto NOVO a cada render do Provider → todos os consumidores re-renderizam sempre. Estabilize com useMemo: <code>const v = useMemo(()=>({user,setUser}),[user])</code>.",
+  senior:"Para estado que muda muito e é global, Context puro não escala — use um store (Zustand, Redux, Jotai) que notifica só quem lê a fatia que mudou (selectors). Regra: Context para 'configuração', store para 'estado que muda'.",
+  l:"https://react.dev/learn/passing-data-deeply-with-context",
+  ex:"Tema claro/escuro com Context lido por um componente neto. Depois coloque um contador de alto/frequência no mesmo Provider e observe no Profiler a árvore inteira re-renderizando — entenda por que Context não é um gerenciador de estado."},
+ {c:"useMemo & useCallback — memoizar valor e função",
+  o:"Ambos guardam algo entre renders enquanto as dependências não mudam: useMemo memoiza um VALOR (resultado de cálculo), useCallback memoiza uma FUNÇÃO. Servem a dois propósitos: pular cálculo caro e estabilizar referências para memo/deps.",
+  mental:"'Não recalcule/recrie isto a menos que estas dependências mudem.' useCallback(fn, deps) é literalmente useMemo(()=>fn, deps).",
+  fundo:"O segundo uso é o mais importante e o menos entendido: estabilizar referências. Um objeto/função inline nasce novo a cada render e quebra (a) o React.memo de um filho e (b) o array de deps de um useEffect. useMemo/useCallback dão a MESMA referência entre renders, fazendo memo e deps funcionarem.",
+  armadilha:"Memoizar cálculo barato custa mais do que economiza (o React ainda compara deps e guarda o valor). E dependências erradas devolvem valor velho. Não é grátis nem automático.",
+  senior:"Ordem de ataque à performance: 1) meça no Profiler; 2) reduza o escopo do estado; 3) só então memoize o que sobrou de caro. O React Compiler (novo) tende a tornar muitos desses manuais desnecessários — saiba explicar isso.",
+  l:"https://react.dev/reference/react/useMemo",
+  ex:"Filtre 50 mil itens e meça com console.time. Envolva em useMemo com a busca como dependência e comprove a diferença ao digitar. Depois remova uma dep e veja o filtro 'congelar' num valor velho."},
+ {c:"useReducer — estado complexo com transições explícitas",
+  o:"Quando o estado tem várias partes que mudam juntas por regras, useReducer centraliza tudo numa função pura (state, action) => newState. É o padrão estado→render deste app, formalizado — e o irmão local do Redux.",
+  mental:"Em vez de espalhar vários setState, você DESPACHA ações ('ADD_ITEM') e um reducer decide o novo estado. As transições ficam num só lugar, testáveis sem UI.",
+  fundo:"O reducer é uma função pura: mesma entrada → mesma saída, sem efeitos, sem mutar o estado recebido (sempre retorne objeto novo). Isso o torna trivial de testar e é o que habilita recursos como time-travel/replay.",
+  codigo:`function reducer(state, action){
+  switch(action.type){
+    case "ADD":    return { ...state, itens:[...state.itens, action.item] };
+    case "REMOVE": return { ...state, itens: state.itens.filter(i=>i.id!==action.id) };
+    case "CLEAR":  return { ...state, itens: [] };
+    default: return state;   // nunca mutar 'state'; sempre retornar novo
+  }
+}
+const [state, dispatch] = useReducer(reducer, { itens: [] });
+dispatch({ type:"ADD", item });`,
+  senior:"Escolha useReducer quando: próximo estado depende do anterior, várias sub-partes mudam juntas, ou você quer testar a lógica isolada. Para 1-2 valores independentes, useState é mais simples — não superengenharia.",
+  l:"https://react.dev/reference/react/useReducer",
+  ex:"Carrinho com ADD/REMOVE/CLEAR num reducer puro. Escreva 3 testes chamando o reducer direto (sem componente) — prove que dá para testar a lógica de estado sem renderizar nada."},
+ {c:"Keys em listas — identidade, não índice",
+  o:"key diz ao React QUAL item é qual entre renders. Com a key certa, ao reordenar/inserir/remover, o React move e preserva o estado dos itens em vez de recriar tudo. É central para performance e correção de listas.",
+  mental:"key é a identidade estável do item (o id do banco), não a posição. O React usa keys durante a reconciliation para casar elementos antigos com novos.",
+  rerender:"Mudar a key de um elemento faz o React DESTRUIR o componente antigo e MONTAR um novo (perde estado interno, refaz efeitos). Isso pode ser bug (usar índice numa lista que reordena) ou ferramenta (mudar a key de propósito para resetar um componente).",
+  armadilha:"key={index} numa lista que reordena/filtra/insere no meio: o React casa por posição, o estado interno (input digitado, checkbox) 'gruda' no item errado, e você tem bugs fantasma. Use um id estável.",
+  codigo:`// ERRADO em lista dinâmica:
+{itens.map((t, i) => <Item key={i} tarefa={t} />)}
+// CERTO:
+{itens.map(t => <Item key={t.id} tarefa={t} />)}`,
+  l:"https://react.dev/learn/rendering-lists",
+  ex:"Lista de itens com um input dentro de cada um. Use key={index}, digite em um e reordene a lista — veja o texto pular de item. Troque para key={id} e prove que o texto acompanha o item certo."},
+ {c:"Custom Hooks — extrair lógica com estado",
+  o:"Um custom hook é uma função use* que combina outros hooks para reutilizar LÓGICA (não UI). É a 'lib interna' do React: o primeiro passo de escala de código de front.",
+  mental:"Componentes reutilizam aparência; hooks reutilizam comportamento com estado. Cada componente que usa o hook tem seu PRÓPRIO estado isolado — o hook compartilha a lógica, não os dados.",
+  fundo:"'use' no início não é enfeite: é o que permite o hook chamar outros hooks e o que o linter usa para checar as Regras dos Hooks (só no topo, só em componentes/hooks — porque o React identifica cada hook pela ORDEM de chamada em cada render).",
+  codigo:`function useLocalStorage(chave, inicial){
+  const [v, setV] = useState(() => {
+    const s = localStorage.getItem(chave);
+    return s ? JSON.parse(s) : inicial;      // inicialização preguiçosa
+  });
+  useEffect(() => { localStorage.setItem(chave, JSON.stringify(v)); }, [chave, v]);
+  return [v, setV];
+}`,
+  senior:"Bom hook tem uma responsabilidade e uma API parecida com a dos hooks nativos (retorna valor + setter/ações). Se ele faz três coisas, quebre em três. É o mesmo princípio de coesão da lição de arquitetura.",
+  l:"https://react.dev/learn/reusing-logic-with-custom-hooks",
+  ex:"Escreva useLocalStorage e use em 2 componentes diferentes com chaves diferentes. Prove que cada um mantém seu próprio valor (estado isolado) mas ambos compartilham a mesma lógica de persistência."}],
 "Angular":[
- {c:"Signals", o:"Reatividade granular e síncrona: signal() guarda valor, computed() deriva, effect() reage. Sem subscribe/unsubscribe — o novo coração do Angular.", l:"https://angular.dev/guide/signals", ex:"Contador com signal + computed(dobro) + effect logando cada mudança."},
- {c:"Standalone Components", o:"Componentes sem NgModule: imports diretos no próprio componente. O padrão moderno — menos cerimônia, tree-shaking melhor.", l:"https://angular.dev/guide/components", ex:"Crie um componente standalone com @Input e @Output e use-o em outro."},
- {c:"Injeção de Dependência", o:"O DI do Angular entrega instâncias prontas via constructor/inject(). providedIn:'root' = singleton do app; providers locais criam escopos.", l:"https://angular.dev/guide/di", ex:"Service TarefasService com signal de lista, injetado em 2 componentes que enxergam o MESMO estado."},
- {c:"RxJS: switchMap & debounceTime", o:"Operadores para fluxos assíncronos: debounceTime espera o usuário parar de digitar; switchMap cancela a request anterior — a dupla clássica do autocomplete.", l:"https://rxjs.dev/guide/operators", ex:"Busca com debounceTime(300) + switchMap chamando uma API; digite rápido e prove no Network que só a última request vive."},
- {c:"Control Flow (@if / @for)", o:"Sintaxe nativa de template que substitui *ngIf/*ngFor. @for exige track — e é aí que mora a performance de listas.", l:"https://angular.dev/guide/templates/control-flow", ex:"Liste 1000 itens com @for com e sem track por id; compare o comportamento ao reordenar."},
- {c:"Lazy Loading de Rotas", o:"loadComponent/loadChildren carregam código só quando a rota é visitada — bundle inicial menor, app mais rápido.", l:"https://angular.dev/guide/routing", ex:"Crie uma rota /admin lazy e confirme no Network que o chunk só baixa ao navegar."}],
+ {c:"Change Detection — o que dispara e o que é verificado",
+  o:"Change detection é o processo que o Angular usa para descobrir o que mudou e atualizar o DOM. Entender O QUE o dispara (e como conter isso) é o tema de performance mais importante do Angular.",
+  mental:"O Angular tem uma árvore de componentes. Quando algo 'pode ter mudado', ele percorre a árvore de cima para baixo checando os bindings de cada componente e atualizando o DOM onde o valor mudou.",
+  fundo:"O gatilho clássico é o <b>Zone.js</b>: ele faz monkey-patch em TODA API assíncrona do browser (setTimeout, addEventListener, fetch, Promise). Quando qualquer uma dispara, o Zone avisa o Angular 'algo aconteceu, verifique a árvore'. Por isso um simples clique ou um setInterval faz o Angular checar a árvore inteira — mesmo partes que não têm nada a ver com o evento.",
+  rerender:"Por padrão (estratégia Default), UM evento assíncrono qualquer faz o Angular verificar TODOS os componentes da árvore. Com <code>ChangeDetectionStrategy.OnPush</code>, um componente só é verificado se: (a) uma @Input mudou por referência, (b) um evento nasceu nele, ou (c) um Observable que ele usa com async pipe emitiu. Signals levam isso além: só re-verifica quem realmente LÊ o signal que mudou.",
+  codigo:`@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,   // opte por isto
+  // ...
+})
+// Com OnPush + signals, o Angular deixa de checar a árvore toda
+// e passa a atualizar só os componentes que dependem do que mudou.`,
+  armadilha:"Mutar um objeto de @Input (push num array existente) com OnPush NÃO dispara verificação — a referência não mudou. Crie um novo array/objeto. É o mesmo princípio de imutabilidade do React.memo.",
+  senior:"O Angular caminha para 'zoneless' (sem Zone.js), usando signals como fonte de reatividade granular. Saber explicar Zone.js → OnPush → Signals como uma evolução de granularidade é resposta de sênior.",
+  l:"https://angular.dev/best-practices/runtime-performance",
+  ex:"Crie um componente com um getter que dá console.log e faça um setInterval no pai. Veja o getter ser chamado sem parar (Default). Ative OnPush e prove que as chamadas despencam."},
+ {c:"Signals — reatividade granular e síncrona",
+  o:"signal() guarda um valor reativo; computed() deriva outro valor com cache; effect() roda quando os signals que ele lê mudam. Sem subscribe/unsubscribe. É o novo coração reativo do Angular.",
+  mental:"Um signal é uma célula de planilha: você lê com s() e escreve com s.set()/s.update(). Um computed é uma célula de fórmula que recalcula sozinha quando suas dependências mudam. O Angular rastreia AUTOMATICAMENTE quem leu quem.",
+  fundo:"O rastreamento é por leitura: quando um computed/effect executa, o Angular registra quais signals foram lidos DURANTE a execução e cria as dependências. Por isso a reatividade é 'granular' — só recalcula/re-renderiza quem de fato leu o signal alterado, diferente do Zone que checa tudo.",
+  codigo:`const n = signal(0);
+const dobro = computed(() => n() * 2);   // recalcula só quando n muda
+effect(() => console.log("n agora é", n()));  // roda a cada mudança de n
+n.update(v => v + 1);   // dobro vira 2, effect loga "n agora é 1"`,
+  armadilha:"computed é preguiçoso e cacheado: se ninguém lê, ele não recalcula. E não coloque efeito colateral (setar outro signal) dentro de computed — computed é para DERIVAR puro, effect é para efeito.",
+  l:"https://angular.dev/guide/signals",
+  ex:"Contador com signal + computed(dobro) + effect logando. Depois crie um computed que ninguém lê e prove (com log) que ele não recalcula até ser lido — entenda a preguiça."},
+ {c:"Injeção de Dependência e escopos",
+  o:"O DI entrega instâncias prontas via inject()/constructor. providedIn:'root' cria um singleton do app inteiro; providers no componente criam uma instância por componente (escopo).",
+  mental:"Você declara 'preciso de um TarefasService' e o Angular resolve, cria (uma vez, se singleton) e injeta. Um grafo de dependências montado pelo framework — o mesmo IoC do Spring/.NET.",
+  fundo:"O DI é hierárquico: cada componente tem um injector que herda do pai. Ao pedir um token, o Angular sobe a árvore até achar quem provê. providedIn:'root' fica no topo (singleton); providers:[X] num componente cria uma instância nova para aquela subárvore — útil para estado isolado por componente.",
+  senior:"Estado compartilhado entre componentes = service singleton com signals. Estado isolado por instância = provider local. Saber escolher o escopo é o que evita 'por que dois componentes estão vendo dados diferentes/iguais sem querer'.",
+  l:"https://angular.dev/guide/di",
+  ex:"TarefasService com um signal de lista, providedIn:'root', injetado em 2 componentes. Prove que os dois veem a MESMA lista. Depois mova para providers:[] local e veja cada um ganhar sua própria lista."},
+ {c:"RxJS: switchMap, debounceTime e vazamento de subscription",
+  o:"RxJS modela fluxos assíncronos ao longo do tempo. debounceTime espera o usuário parar; switchMap troca para o novo fluxo cancelando o anterior — a dupla do autocomplete. E subscription sem unsubscribe vaza memória.",
+  mental:"Um Observable é um cano de valores no tempo. Operadores são conexões no cano. switchMap = 'só me importo com o resultado da ÚLTIMA emissão; cancele as anteriores'.",
+  fundo:"A diferença entre os *Map é o comportamento com emissões concorrentes: switchMap cancela a anterior (busca), mergeMap roda todas em paralelo (uploads), concatMap enfileira (ordem importa), exhaustMap ignora novas até terminar (evitar duplo-clique). Escolher o errado é bug sutil de produção.",
+  armadilha:"subscribe() manual sem unsubscribe (ou sem takeUntilDestroyed/async pipe) vaza: o fluxo continua vivo após o componente morrer. Prefira o async pipe (desinscreve sozinho) ou takeUntilDestroyed().",
+  l:"https://rxjs.dev/guide/operators",
+  ex:"Busca com debounceTime(300)+switchMap. Digite rápido e prove no Network que só a última request sobrevive. Depois troque por mergeMap e veja várias requests vivas — entenda a diferença."},
+ {c:"Control Flow (@if / @for) e o track",
+  o:"A sintaxe nativa @if/@for/@switch substitui *ngIf/*ngFor. É mais rápida e legível — e o @for EXIGE track, que é onde mora a performance de listas.",
+  mental:"track no @for é a key do React: diz ao Angular qual item é qual, para ele mover nós do DOM em vez de destruir e recriar tudo ao reordenar/filtrar.",
+  rerender:"Sem track adequado (ou com track por índice numa lista que reordena), o Angular recria os elementos, perdendo estado do DOM e refazendo trabalho. Com track por id estável, ele reaproveita os nós existentes.",
+  l:"https://angular.dev/guide/templates/control-flow",
+  ex:"Liste 1000 itens com @for; use track $index e depois track item.id. Reordene e compare no DevTools a quantidade de nós recriados."},
+ {c:"Lazy Loading de Rotas",
+  o:"loadComponent/loadChildren carregam o código de uma rota só quando ela é visitada — o bundle inicial fica menor e o app abre mais rápido.",
+  mental:"Não entregue o app inteiro no primeiro carregamento. Entregue o essencial e vá buscando o resto sob demanda, rota a rota.",
+  fundo:"O bundler (esbuild/Webpack) faz code splitting: cada rota lazy vira um chunk separado. O Angular só baixa esse chunk quando o roteador navega até a rota — dá para pré-carregar em background com estratégias de preloading.",
+  l:"https://angular.dev/guide/routing",
+  ex:"Crie uma rota /admin com loadComponent e confirme na aba Network que o chunk do admin só é baixado quando você navega até lá."}],
 "Vue 3":[
  {c:"ref vs reactive", o:"ref() embrulha um valor (acesso via .value); reactive() torna um objeto profundo reativo — mas perde reatividade ao desestruturar. Na dúvida, ref.", l:"https://vuejs.org/guide/essentials/reactivity-fundamentals.html", ex:"Crie o mesmo contador com ref e com reactive; desestruture o reactive e mostre por que quebra."},
  {c:"computed & watch", o:"computed deriva valor com cache; watch executa efeito quando algo muda. Se dá para derivar, use computed — watch é para efeitos colaterais.", l:"https://vuejs.org/guide/essentials/computed.html", ex:"Lista filtrada com computed + um watch salvando no localStorage."},
@@ -2896,11 +3067,61 @@ const LEITURAS = {
  {c:"Layouts & Rotas Dinâmicas", o:"Pastas = rotas; layout.tsx compartilha UI sem re-renderizar; [id] cria rotas dinâmicas.", l:"https://nextjs.org/docs/app/building-your-application/routing", ex:"Crie /tarefas e /tarefas/[id] com um layout comum mostrando o total."},
  {c:"Streaming & Suspense", o:"loading.tsx e <Suspense> enviam a página em pedaços — o usuário vê algo útil enquanto o lento carrega.", l:"https://nextjs.org/docs/app/building-your-application/routing/loading-ui-and-streaming", ex:"Dashboard com um bloco lento (await de 3s) envolto em Suspense com skeleton."}],
 "Node.js + Express":[
- {c:"Event Loop", o:"Node é single-thread com I/O assíncrono: rápido para muitas conexões, péssimo para CPU pesada — um loop bloqueado para TODAS as requests.", l:"https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick", ex:"Crie uma rota com um for gigante síncrono e outra com setTimeout; chame as duas em paralelo e veja o bloqueio."},
- {c:"Middlewares", o:"Funções (req, res, next) em cadeia — logging, auth, parsing, erro. A ordem de registro É a arquitetura do Express.", l:"https://expressjs.com/en/guide/using-middleware.html", ex:"Middleware que loga método+rota+tempo de resposta de todas as requests."},
- {c:"Erros em rotas async", o:"Erro em função async sem catch derruba o processo. Express 5 propaga automaticamente; antes, use um wrapper. Centralize num error handler de 4 argumentos.", l:"https://expressjs.com/en/guide/error-handling.html", ex:"Rota async que lança erro + handler central devolvendo JSON padronizado com status correto."},
- {c:"Streams", o:"Processam dados em pedaços sem carregar tudo na memória — arquivos grandes, CSV, proxies. pipe() conecta origem a destino.", l:"https://nodejs.org/api/stream.html", ex:"Sirva um arquivo de 100MB com fs.createReadStream().pipe(res) e compare a memória com readFile."},
- {c:"Cluster & Worker Threads", o:"cluster multiplica o processo pelos núcleos; worker_threads tira CPU pesada do loop principal. É o 'escala vertical' do Node.", l:"https://nodejs.org/api/cluster.html", ex:"Rode seu servidor com cluster nos núcleos da máquina e meça RPS antes/depois com autocannon."}],
+ {c:"Event Loop — como o Node faz muito com uma thread",
+  o:"O Node roda seu JavaScript em UMA thread, mas delega I/O (rede, disco) ao sistema operacional e a um pool de threads. O event loop coordena tudo: por isso o Node aguenta milhares de conexões, mas trava com CPU pesada.",
+  mental:"Pense num garçom só (a thread) atendendo 100 mesas. Ele anota pedidos e leva para a cozinha (I/O do SO), sem ficar parado esperando cada prato. Mas se UMA mesa pede para ele descascar 10 mil batatas (CPU), as outras 99 esperam.",
+  fundo:"O event loop tem fases: timers (setTimeout), pending callbacks, poll (I/O), check (setImmediate), close. Callbacks de I/O concluído entram na fila e rodam entre as fases. Microtasks (Promises, process.nextTick) rodam ANTES de ir para a próxima fase — por isso Promise resolve antes de setTimeout(0).",
+  rerender:"Nada re-renderiza (é backend), mas o insight é: um trecho SÍNCRONO longo (loop pesado, JSON.parse de 50MB, crypto sync) bloqueia o loop e CONGELA todas as requisições simultâneas — não só a atual. Latência p99 explode.",
+  codigo:`// BLOQUEIA todo o servidor:
+app.get("/pesado", (req,res) => {
+  let s = 0; for(let i=0;i<5e9;i++) s+=i;   // ~segundos de CPU
+  res.json({ s });                          // ninguém mais é atendido nesse tempo
+});
+// Melhor: mova CPU pesada para worker_threads ou um serviço separado.`,
+  armadilha:"'É async, então não bloqueia' — falso. async/await não paraleliza CPU; só libera o loop em pontos de await de I/O. Um for de 1 bilhão dentro de função async bloqueia igual.",
+  senior:"Meça o 'event loop lag' (ex.: perf_hooks.monitorEventLoopDelay). Se sobe sob carga, você tem trabalho síncrono demais. Solução: worker_threads para CPU, streaming para dados grandes, ou tirar o trabalho do processo (fila).",
+  l:"https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick",
+  ex:"Uma rota com for de 5e9 (síncrono) e outra com setTimeout. Bata nas duas em paralelo (autocannon) e veja a latência da rota leve disparar enquanto a pesada roda — o bloqueio na prática."},
+ {c:"Middlewares — a cadeia é a arquitetura",
+  o:"Middleware é uma função (req, res, next) numa cadeia. Cada uma pode ler/alterar req e res, encerrar a resposta, ou chamar next() para passar adiante. Logging, auth, parsing e erro são middlewares.",
+  mental:"Uma linha de montagem: a requisição passa por estações na ORDEM em que você as registrou. Cada estação faz seu trabalho e empurra para a próxima com next().",
+  fundo:"A ordem importa e é a fonte nº1 de bugs: um middleware de auth registrado DEPOIS da rota não protege nada; o body parser registrado depois da rota deixa req.body undefined. Chamar res.send sem next encerra a cadeia; chamar next() sem encerrar passa adiante.",
+  armadilha:"Esquecer next() (a request pendura para sempre) ou chamar next() DEPOIS de já ter respondido (erro 'headers already sent'). Middleware de erro tem 4 args (err, req, res, next) — se você põe 3, o Express não o reconhece como error handler.",
+  l:"https://expressjs.com/en/guide/using-middleware.html",
+  ex:"Middleware que loga método+rota+tempo de resposta. Registre-o ANTES e depois DEPOIS das rotas e veja a diferença no que ele captura."},
+ {c:"Erros em rotas async e o error handler central",
+  o:"Uma exceção em função async que não é capturada vira uma unhandledRejection e pode derrubar o processo. A defesa é um error handler central (4 argumentos) e propagar erros para ele.",
+  mental:"Não trate erro em cada rota; deixe o erro 'subir' para um único lugar que formata a resposta. Rotas ficam limpas, respostas de erro ficam consistentes.",
+  fundo:"No Express 4, um throw dentro de async não é pego pelo Express automaticamente — você precisa de try/catch + next(err) ou de um wrapper (asyncHandler). O Express 5 passou a capturar rejeições de promises retornadas, propagando ao error handler sozinho.",
+  codigo:`// wrapper que evita try/catch em toda rota (Express 4):
+const wrap = fn => (req,res,next) => Promise.resolve(fn(req,res,next)).catch(next);
+app.get("/x", wrap(async (req,res) => { throw new Error("boom"); }));
+// error handler central (por último, com 4 args):
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.status || 500).json({ erro: err.message });
+});`,
+  senior:"Padronize o corpo de erro (código, mensagem, traceId) e mapeie exceções de domínio para status HTTP num só lugar. Logue com contexto (traceId) para correlacionar na observabilidade.",
+  l:"https://expressjs.com/en/guide/error-handling.html",
+  ex:"Rota async que lança erro + wrapper + handler central devolvendo JSON padronizado com o status certo. Prove que o processo NÃO cai."},
+ {c:"Streams e backpressure",
+  o:"Streams processam dados em PEDAÇOS, sem carregar tudo na RAM — essenciais para arquivos grandes, CSV, upload/download e proxies. pipe() conecta uma origem a um destino e cuida do ritmo.",
+  mental:"Em vez de encher um balde inteiro (buffer) e despejar, você usa uma mangueira: os dados fluem em pedaços. Se o destino é mais lento que a origem, o backpressure segura a origem para não estourar a memória.",
+  fundo:"readFile carrega o arquivo TODO na memória antes de responder — 100 arquivos de 100MB = 10GB de RAM. createReadStream().pipe(res) envia conforme lê, com memória constante. pipe() implementa o backpressure automaticamente (pausa a leitura quando o buffer de escrita enche).",
+  codigo:`// memória constante, aguenta arquivo gigante:
+app.get("/download", (req,res) => {
+  fs.createReadStream("grande.zip").pipe(res);
+});
+// vs readFile: carrega tudo na RAM antes de enviar (não escala).`,
+  l:"https://nodejs.org/api/stream.html",
+  ex:"Sirva um arquivo de 100MB com createReadStream().pipe(res) e depois com readFile. Compare a memória do processo (process.memoryUsage) nos dois casos."},
+ {c:"Cluster & Worker Threads — usar todos os núcleos",
+  o:"Uma instância Node usa um núcleo. cluster (ou PM2) sobe vários processos que dividem a mesma porta; worker_threads roda CPU pesada em threads separadas sem bloquear o loop principal.",
+  mental:"cluster = várias cópias do garçom atendendo mais mesas (escala de I/O pelos núcleos). worker_threads = mandar a tarefa de descascar batatas para outra pessoa, deixando o garçom livre (tira CPU do loop).",
+  fundo:"cluster compartilha o socket via o processo master, que distribui conexões entre workers — bom para APIs I/O-bound. worker_threads compartilham memória via SharedArrayBuffer e trocam mensagens — bom para CPU-bound (parsing, imagem, criptografia).",
+  senior:"Em produção, o orquestrador (Kubernetes) costuma escalar réplicas horizontalmente, então nem sempre você usa cluster — 1 processo por container e N containers. Saber quando é cluster (1 VM, muitos núcleos) vs. réplicas (K8s) é resposta de arquiteto.",
+  l:"https://nodejs.org/api/worker_threads.html",
+  ex:"Rode seu servidor com cluster nos núcleos da máquina e meça RPS antes/depois com autocannon. Depois mova um cálculo pesado para um worker_thread e veja a latência das outras rotas parar de sofrer."}],
 "NestJS":[
  {c:"Modules & DI", o:"Tudo vive em módulos que declaram providers e exports — fronteiras explícitas de dependência (o bounded context em código).", l:"https://docs.nestjs.com/modules", ex:"Crie TarefasModule com service exportado e importe em outro módulo."},
  {c:"DTOs & ValidationPipe", o:"class-validator + ValidationPipe global: toda entrada validada e tipada na borda, com erros 400 automáticos.", l:"https://docs.nestjs.com/techniques/validation", ex:"DTO CriarTarefaDto com @IsString/@MaxLength e prove o 400 detalhado com payload inválido."},
